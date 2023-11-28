@@ -311,7 +311,16 @@ class WalshHadamardCS(H_functions):
         return out
     
 class MRI(H_functions):
-    def under_sample(self, vec, factor):
+    # MRI forward operator in its native form is: y = SFx where S is a sampling operator and F is the Fourier Operator
+    # to circumevent comutational bottlenecks we do not use a naive Fouerier Matrix of dimension (WH x WH) but torch's
+    # FFT implementation. Note that we use the centered FFT (fftshift)! As we are only working with single coil data, 
+    # the used Sampling operator is just a Matrix consisting of ones and can hence be ignored for now. We provide however
+    # code to create sampling masks for Parallel Imaging (PI).
+
+    # for MRI images the channel is one -> No color information 
+    # this could be used if one extends the problem to parallel imaging (e.g. SENSE)
+    # for nor please set factor to 1!!!
+    def under_sample(self, vec, factor = 1):
         # dimension is N x C x W x H 
         mask = torch.zeros(vec.shape)
         mask[:, :, :, ::factor] = 1
@@ -327,16 +336,19 @@ class MRI(H_functions):
     # for V we use iFFT 
     def V(self, vec):
         tmp = vec.clone().reshape(vec.shape[0], self.channels, self.img_dim, self.img_dim)
-        #tmp = vec.clone().reshape(vec.shape[0], -1) # new
-        # return centered iFFT of image 
-        ifft2_tmp = torch.fft.ifft2(tmp)
+
+        # simulate undersampling in k-space - only needed for PI
+        if self.under_sample != 1:
+            tmp = self.under_sample(tmp, self.usamp_factor)
+
+        ifft2_tmp =  torch.fft.ifft2(torch.fft.fftshift(tmp))
         return torch.abs(ifft2_tmp.reshape(vec.shape[0], -1))
 
     def Vt(self, vec):
         tmp = vec.clone()
         # return centered FFT of image 
         fft2_tmp = torch.fft.fftshift(torch.fft.fft2(tmp))
-        # simulate undersampling in k-space
+        
         if self.under_sample != 1:
             fft2_tmp = self.under_sample(fft2_tmp, self.usamp_factor)
         return fft2_tmp.reshape(vec.shape[0], -1)
